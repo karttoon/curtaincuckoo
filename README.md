@@ -6,6 +6,8 @@ CurtainCuckoo is a Cuckoo module interpretation of the Curtain standalone script
 
 Not all PowerShell will be debofuscated, such as token-replacement, but in general you will be able to see the full execution flow of the PowerShell and generally remove multiple layers of obfuscation or easier analysis.
 
+![Curtain Cuckoo](https://github.com/karttoon/curtaincuckoo/curtain_27AUG2018.png)
+
 ### [+] INSTALL [+]
 
 There are multiple files that need to be setup for the module to be installed in Cuckoo. This module was designed and tested on Cuckoo 2.0.
