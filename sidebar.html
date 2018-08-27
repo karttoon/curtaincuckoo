@@ -1,0 +1,18 @@
+<!--
+__author__  = "Jeff White [karttoon] @noottrak"
+__email__   = "jwhite@paloaltonetworks.com"
+__version__ = "1.0.0"
+__date__    = "15NOV2017
+-->
+
+
+{% if report.analysis.curtain %}
+    <li>
+        <a href="{% url "analysis" report.analaysis.info.id "curtain" %}">
+            <i class="glyphicon glypicon-download-alt"></i>Curtain
+            <span class="label label-primary pull-right">
+                {{ report.analysis.curtain|length }}
+            </span>
+        </a>
+    </li>
+{% endif %}
