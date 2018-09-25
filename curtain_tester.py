@@ -1,15 +1,11 @@
 import logging, os, re, ast, itertools
 import xml.etree.ElementTree as ET
-
-from cuckoo.common.abstracts import Processing
-from cuckoo.common.exceptions import CuckooProcessingError
-
+import sys # Only for testing
 log = logging.getLogger(__name__)
 
+# DEV - TAKES INPUT FOR "curtain.log"
 __author__  = "Jeff White [karttoon] @noottrak"
-__email__   = "jwhite@paloaltonetworks.com"
 __version__ = "1.0.8"
-__date__    = "25SEP2018"
 
 def buildBehaviors(entry, behaviorTags):
     # Generates possible code injection variations
@@ -32,22 +28,22 @@ def buildBehaviors(entry, behaviorTags):
 
     behaviorCol["Code Injection"] = list(itertools.product(*codeInject))
 
-    behaviorCol["Downloader"] = [["Net.WebClient","DownloadFile"],
-                                 ["Net.WebClient","DownloadString"],
-                                 ["Net.WebClient","DownloadData"],
-                                 ["Net.WebRequest","WebProxy","Net.CredentialCache"],
-                                 ["Start-BitsTransfer", "Source", "Destination"],
-                                 ["Net.Sockets.TCPClient", "GetStream"],
+    behaviorCol["Downloader"] = [["New-Object System.Net.WebClient","DownloadFile"],
+                                 ["New-Object System.Net.WebClient","DownloadString"],
+                                 ["New-Object System.Net.WebClient","DownloadData"],
+                                 ["System.Net.WebRequest","WebProxy","System.Net.CredentialCache"],
+                                 ["Import-Module BitsTransfer", "Start-BitsTransfer", "Source", "Destination"],
+                                 ["New-Object System.Net.Sockets.TCPClient", "GetStream"],
                                  ["$env:LocalAppData"]]
 
     behaviorCol["Starts Process"] = [["Start-Process"],
-                                     ["IO.MemoryStream", "IO.StreamReader"],
+                                     ["New-Object IO.MemoryStream", "New-Object IO.StreamReader"],
                                      ["System.Diagnostics.Process]::Start"]]
 
     behaviorCol["Compression"] = [["Convert", "FromBase64String", "System.Text.Encoding"],
-                                  ["IO.Compression.GzipStream"],
+                                  ["New-Object IO.Compression.GzipStream"],
                                   ["[IO.Compression.CompressionMode]::Decompress"],
-                                  ["IO.Compression.DeflateStream"]]
+                                  ["New-Object IO.Compression.DeflateStream"]]
 
     behaviorCol["Uses Stealth"] = [["WindowStyle", "Hidden"],
                                    ["CreateNoWindow=$true"],
@@ -55,7 +51,7 @@ def buildBehaviors(entry, behaviorTags):
 
     behaviorCol["Key Logging"] = [["GetAsyncKeyState", "Windows.Forms.Keys"]]
 
-    behaviorCol["Screen Scraping"] = [["Drawing.Bitmap", "Width", "Height"],
+    behaviorCol["Screen Scraping"] = [["New-Object Drawing.Bitmap", "Width", "Height"],
                                       ["[Drawing.Graphics]::FromImage"],
                                       ["CopyFroMScreen", "Location", "[Drawing.Point]::Empty", "Size"]]
 
@@ -71,7 +67,7 @@ def buildBehaviors(entry, behaviorTags):
 
     behaviorCol["Obfuscation"] = [["-Join", "[int]", "-as", "[char]"]]
 
-    behaviorCol["Crypto"] = [["System.Security.Cryptography.AESCryptoServiceProvider", "Mode", "Key", "IV"],
+    behaviorCol["Crypto"] = [["New-Object System.Security.Cryptography.AESCryptoServiceProvider", "Mode", "Key", "IV"],
                              ["CreateEncryptor().TransformFinalBlock"],
                              ["CreateDecryptor().TransformFinalBlock"]]
 
@@ -90,7 +86,7 @@ def buildBehaviors(entry, behaviorTags):
                                             ["[Security.Principal.WindowsBuiltInRole]", "Administrator"],
                                             ["[System.Diagnostics.Process]::GetCurrentProcess"],
                                             ["PSVersionTable.PSVersion"],
-                                            ["System.Diagnostics.ProcessStartInfo"],
+                                            ["New-Object System.Diagnostics.ProcessStartInfo"],
                                             ["GWMI Win32_ComputerSystemProduct"],
                                             ["Get-WMIObject Win32_ComputerSystemProduct"],
                                             ["Get-Process -id"],
@@ -299,218 +295,202 @@ def replaceDecoder(inputString, MODFLAG):
 
     if MODFLAG == 0:
         MODFLAG = 1
-
     return inputString, MODFLAG
 
-class Curtain(Processing):
-    """Parse Curtain log for PowerShell 4104 Events."""
+def curtain():
 
-    def run(self):
+    # Remove some event entries which are commonly found in all samples (noise reduction)
+    noise = [
+        "$global:?",
+        "# Compute file-hash using the crypto object",
+        "# Construct the strongly-typed crypto object",
+        "HelpInfoURI = 'http://go.microsoft.com/fwlink/?linkid=285758'",
+        "[System.Management.ManagementDateTimeConverter]::ToDmtfDateTime($args[0])",
+        "[System.Management.ManagementDateTimeConverter]::ToDateTime($args[0])",
+        "Set-Location Z:",
+        "Set-Location Y:",
+        "Set-Location X:",
+        "Set-Location W:",
+        "Set-Location V:",
+        "Set-Location U:",
+        "Set-Location T:",
+        "Set-Location S:",
+        "Set-Location R:",
+        "Set-Location Q:",
+        "Set-Location P:",
+        "Set-Location O:",
+        "Set-Location N:",
+        "Set-Location M:",
+        "Set-Location L:",
+        "Set-Location K:",
+        "Set-Location J:",
+        "Set-Location I:",
+        "Set-Location H:",
+        "Set-Location G:",
+        "Set-Location F:",
+        "Set-Location E:",
+        "Set-Location D:",
+        "Set-Location C:",
+        "Set-Location B:",
+        "Set-Location A:",
+        "Set-Location ..",
+        "Set-Location \\",
+        "$wrappedCmd = $ExecutionContext.InvokeCommand.GetCommand('Out-String',[System.Management.Automation.CommandTypes]::Cmdlet)",
+        "$str.Substring($str.LastIndexOf('Verbs') + 5)",
+        "[Parameter(ParameterSetName='nameSet', Position=0, ValueFromPipelineByPropertyName=$true)]",
+        "[ValidateSet('Alias','Cmdlet','Provider','General','FAQ','Glossary','HelpFile'",
+        "param([string[]]$paths)",
+        "$origin = New-Object System.Management.Automation.Host.Coordinates",
+        "Always resolve file paths using Resolve-Path -Relative.",
+        "PS $($executionContext.SessionState.Path.CurrentLocation)$('>' * ($nestedPromptLevel + 1))",
+        "$this.ServiceName",
+        "Read-Host 'Press Enter to continue...' | Out-Null",
+        "([System.Management.Automation.CommandTypes]::Script)",
+        "if ($myinv -and ($myinv.MyCommand -or ($_.CategoryInfo.Category -ne 'ParserError')))",
+        "CmdletsToExport=@(",
+        "CmdletsToExport",
+        "FormatsToProcess",
+        "AliasesToExport",
+        "FunctionsToExport",
+        "$_.PSParentPath.Replace",
+        "$ExecutionContext.SessionState.Path.Combine",
+        "get-help about_Command_Precedence"
+    ]
 
-        self.key = "curtain"
-        # Remove some event entries which are commonly found in all samples (noise reduction)
-        noise = [
-            "$global:?",
-            "# Compute file-hash using the crypto object",
-            "# Construct the strongly-typed crypto object",
-            "HelpInfoURI = 'http://go.microsoft.com/fwlink/?linkid=285758'",
-            "[System.Management.ManagementDateTimeConverter]::ToDmtfDateTime($args[0])",
-            "[System.Management.ManagementDateTimeConverter]::ToDateTime($args[0])",
-            "Set-Location Z:",
-            "Set-Location Y:",
-            "Set-Location X:",
-            "Set-Location W:",
-            "Set-Location V:",
-            "Set-Location U:",
-            "Set-Location T:",
-            "Set-Location S:",
-            "Set-Location R:",
-            "Set-Location Q:",
-            "Set-Location P:",
-            "Set-Location O:",
-            "Set-Location N:",
-            "Set-Location M:",
-            "Set-Location L:",
-            "Set-Location K:",
-            "Set-Location J:",
-            "Set-Location I:",
-            "Set-Location H:",
-            "Set-Location G:",
-            "Set-Location F:",
-            "Set-Location E:",
-            "Set-Location D:",
-            "Set-Location C:",
-            "Set-Location B:",
-            "Set-Location A:",
-            "Set-Location ..",
-            "Set-Location \\",
-            "$wrappedCmd = $ExecutionContext.InvokeCommand.GetCommand('Out-String',[System.Management.Automation.CommandTypes]::Cmdlet)",
-            "$str.Substring($str.LastIndexOf('Verbs') + 5)",
-            "[Parameter(ParameterSetName='nameSet', Position=0, ValueFromPipelineByPropertyName=$true)]",
-            "[ValidateSet('Alias','Cmdlet','Provider','General','FAQ','Glossary','HelpFile'",
-            "param([string[]]$paths)",
-            "$origin = New-Object System.Management.Automation.Host.Coordinates",
-            "Always resolve file paths using Resolve-Path -Relative.",
-            "PS $($executionContext.SessionState.Path.CurrentLocation)$('>' * ($nestedPromptLevel + 1))",
-            "$this.ServiceName",
-            "Read-Host 'Press Enter to continue...' | Out-Null",
-            "([System.Management.Automation.CommandTypes]::Script)",
-            "if ($myinv -and ($myinv.MyCommand -or ($_.CategoryInfo.Category -ne 'ParserError')))",
-            "CmdletsToExport=@(",
-            "CmdletsToExport",
-            "FormatsToProcess",
-            "AliasesToExport",
-            "FunctionsToExport",
-            "$_.PSParentPath.Replace",
-            "$ExecutionContext.SessionState.Path.Combine",
-            "get-help about_Command_Precedence"
-        ]
+    try:
+        tree = ET.parse(sys.argv[1]) # curtain.log
+        root = tree.getroot()
+    except Exception as e:
+        print "Failed opening curtain.log: %s" % e.message
 
-        # Determine oldest Curtain log and remove the rest
-        curtLog = os.listdir("%s/curtain/" % self.analysis_path)
-        curtLog.sort()
-        curtLog = curtLog[-1]
+    pids          = {}
 
-        # Leave only the most recent file
-        for file in os.listdir("%s/curtain/" % self.analysis_path):
-            if file != curtLog:
-                try:
-                    os.remove("%s/curtain/%s" % (self.analysis_path, file))
-                except:
-                    pass
+    COUNTER = 0
+    FILTERED = 0
 
-        os.rename("%s/curtain/%s" % (self.analysis_path, curtLog), "%s/curtain/curtain.log" % self.analysis_path)
+    for i in range(0,len(root)):
 
-        try:
-            tree = ET.parse("%s/curtain/curtain.log" % self.analysis_path)
-            root = tree.getroot()
-        except Exception as e:
-            raise CuckooProcessingError("Failed opening curtain.log: %s" % e.message)
+        # Setup PID Dict
+        if root[i][0][1].text == "4104":
 
-        pids     = {}
-        COUNTER  = 0
-        FILTERED = 0
+            FILTERFLAG = 0
 
-        for i in range(0,len(root)):
+            PID = root[i][0][10].attrib['ProcessID']
+            #TID = root[i][0][10].attrib['ThreadID']
 
-            # Setup PID Dict
-            if root[i][0][1].text == "4104":
+            MESSAGE = root[i][1][2].text
 
-                FILTERFLAG = 0
+            if PID not in pids:
+                pids[PID] = {
+                    "pid": PID,
+                    "events": [],
+                    "filter": []
+                }
 
-                PID = root[i][0][10].attrib['ProcessID']
-                #TID = root[i][0][10].attrib['ThreadID']
+            # Checks for unique strings in events to filter out
+            if MESSAGE != None:
+                for entry in noise:
+                    if entry in MESSAGE:
+                        FILTERFLAG = 1
+                        FILTERED  += 1
+                        pids[PID]["filter"].append({str(FILTERED): MESSAGE.strip()})
 
-                MESSAGE = root[i][1][2].text
+            # Save the record
+            if FILTERFLAG == 0 and MESSAGE != None:
 
-                if PID not in pids:
-                    pids[PID] = {
-                        "pid": PID,
-                        "events": [],
-                        "filter": []
-                    }
+                COUNTER += 1
+                MODFLAG = 0
 
-                # Checks for unique strings in events to filter out
-                if MESSAGE != None:
-                    for entry in noise:
-                        if entry in MESSAGE:
-                            FILTERFLAG = 1
-                            FILTERED  += 1
-                            pids[PID]["filter"].append({str(FILTERED): MESSAGE.strip()})
+                # Attempt to further decode token replacement/other common obfuscation
+                # Original and altered will be saved
+                ALTMSG = MESSAGE.strip()
 
-                # Save the record
-                if FILTERFLAG == 0 and MESSAGE != None:
+                if re.search("\x00", ALTMSG):
+                    ALTMSG, MODFLAG = removeNull(ALTMSG, MODFLAG)
 
-                    COUNTER += 1
-                    MODFLAG = 0
+                if re.search("(\\\"|\\\')", ALTMSG):
+                    ALTMSG, MODFLAG = removeEscape(ALTMSG, MODFLAG)
 
-                    # Attempt to further decode token replacement/other common obfuscation
-                    # Original and altered will be saved
-                    ALTMSG = MESSAGE.strip()
+                if re.search("`", ALTMSG):
+                    ALTMSG, MODFLAG = removeTick(ALTMSG, MODFLAG)
 
-                    if re.search("\x00", ALTMSG):
-                        ALTMSG, MODFLAG = removeNull(ALTMSG, MODFLAG)
+                if re.search("\^", ALTMSG):
+                    ALTMSG, MODFLAG = removeCaret(ALTMSG, MODFLAG)
 
-                    if re.search("(\\\"|\\\')", ALTMSG):
-                        ALTMSG, MODFLAG = removeEscape(ALTMSG, MODFLAG)
+                while re.search("[\x20]{2,}", ALTMSG):
+                    ALTMSG, MODFLAG = spaceReplace(ALTMSG, MODFLAG)
 
-                    if re.search("`", ALTMSG):
-                        ALTMSG, MODFLAG = removeTick(ALTMSG, MODFLAG)
+                if re.search ("\[[Cc][Hh][Aa][Rr]\][0-9]{1,3}", ALTMSG):
+                    ALTMSG, MODFLAG = charReplace(ALTMSG, MODFLAG)
 
-                    if re.search("\^", ALTMSG):
-                        ALTMSG, MODFLAG = removeCaret(ALTMSG, MODFLAG)
+                # One run pre formatReplace
+                if re.search("(\"\+\"|\'\+\')", ALTMSG):
+                    ALTMSG, MODFLAG = joinStrings(ALTMSG, MODFLAG)
 
-                    while re.search("[\x20]{2,}", ALTMSG):
-                        ALTMSG, MODFLAG = spaceReplace(ALTMSG, MODFLAG)
+                while re.search("(\"|\')(\{[0-9]{1,2}\})+(\"|\')[ -fF]+(\'.+?\'\))", ALTMSG):
+                    ALTMSG, MODFLAG = formatReplace(ALTMSG, MODFLAG)
 
-                    if re.search ("\[[Cc][Hh][Aa][Rr]\][0-9]{1,3}", ALTMSG):
-                        ALTMSG, MODFLAG = charReplace(ALTMSG, MODFLAG)
+                # One run post formatReplace for new strings
+                if re.search("(\"\+\"|\'\+\')", ALTMSG):
+                    ALTMSG, MODFLAG = joinStrings(ALTMSG, MODFLAG)
 
-                    # One run pre formatReplace
-                    if re.search("(\"\+\"|\'\+\')", ALTMSG):
-                        ALTMSG, MODFLAG = joinStrings(ALTMSG, MODFLAG)
+                if "replace" in ALTMSG.lower():
+                    try:
+                        ALTMSG, MODFLAG = replaceDecoder(ALTMSG, MODFLAG)
+                    except Exception as e:
+                        log.error("Curtain processing error for entry - %s" % e)
 
-                    while re.search("(\"|\')(\{[0-9]{1,2}\})+(\"|\')[ -fF]+(\'.+?\'\))", ALTMSG):
-                        ALTMSG, MODFLAG = formatReplace(ALTMSG, MODFLAG)
+                # Remove camel case obfuscation as last step
+                ALTMSG, MODFLAG = adjustCase(ALTMSG, MODFLAG)
 
-                    # One run post formatReplace for new strings
-                    if re.search("(\"\+\"|\'\+\')", ALTMSG):
-                        ALTMSG, MODFLAG = joinStrings(ALTMSG, MODFLAG)
+                if MODFLAG == 0:
+                    ALTMSG = "No alteration of event."
 
-                    if "replace" in ALTMSG.lower():
-                        try:
-                            ALTMSG, MODFLAG = replaceDecoder(ALTMSG, MODFLAG)
-                        except Exception as e:
-                            log.error("Curtain processing error for entry - %s" % e)
+                # Save the output
+                pids[PID]["events"].append({str(COUNTER): {"original": MESSAGE.strip(), "altered": ALTMSG}})
 
-                    # Remove camel case obfuscation as last step
-                    ALTMSG, MODFLAG = adjustCase(ALTMSG, MODFLAG)
+    remove = []
 
-                    if MODFLAG == 0:
-                        ALTMSG = "No alteration of event."
+    # Find Curtain PID if it was picked up in log
+    for pid in pids:
+        for event in pids[pid]["events"]:
+            for entry in event.values():
+                if "Process { [System.Diagnostics.Eventing.Reader.EventLogSession]::GlobalSession.ClearLog" in entry["original"]:
+                    if pid not in remove:
+                        remove.append(pid)
 
-                    # Save the output
-                    pids[PID]["events"].append({str(COUNTER): {"original": MESSAGE.strip(), "altered": ALTMSG}})
+    # Find empty PID
+    for pid in pids:
+        if len(pids[pid]["events"]) == 0:
+            if pid not in remove:
+                remove.append(pid)
 
-        remove = []
+    # Remove PIDs
+    for pid in remove:
+        del pids[pid]
 
-        # Find Curtain PID if it was picked up in log
-        for pid in pids:
-            for event in pids[pid]["events"]:
-                for entry in event.values():
-                    if "Process { [System.Diagnostics.Eventing.Reader.EventLogSession]::GlobalSession.ClearLog" in entry["original"]:
-                        if pid not in remove:
-                            remove.append(pid)
+    # Reorder event counts
+    for pid in pids:
+        tempEvents = []
+        eventCount = len(pids[pid]["events"])
+        for index, entry in enumerate(pids[pid]["events"]):
+            tempEvents.append({"%02d" % (eventCount - index): entry.values()[0]})
+        pids[pid]["events"] = tempEvents
 
-        # Find empty PID
-        for pid in pids:
-            if len(pids[pid]["events"]) == 0:
-                if pid not in remove:
-                    remove.append(pid)
+        tempEvents = []
+        eventCount = len(pids[pid]["filter"])
+        for index, entry in enumerate(pids[pid]["filter"]):
+            tempEvents.append({"%02d" % (eventCount - index): entry.values()[0]})
+        pids[pid]["filter"] = tempEvents
 
-        # Remove PIDs
-        for pid in remove:
-            del pids[pid]
+    # Identify behaviors per PID
+    behaviorTags = []
+    for pid in pids:
+        for entry in pids[pid]["events"]:
+            behaviorTags = buildBehaviors(entry, behaviorTags)
 
-        # Reorder event counts
-        for pid in pids:
-            tempEvents = []
-            eventCount = len(pids[pid]["events"])
-            for index, entry in enumerate(pids[pid]["events"]):
-                tempEvents.append({"%02d" % (eventCount - index): entry.values()[0]})
-            pids[pid]["events"] = tempEvents
+    return pids
 
-            tempEvents = []
-            eventCount = len(pids[pid]["filter"])
-            for index, entry in enumerate(pids[pid]["filter"]):
-                tempEvents.append({"%02d" % (eventCount - index): entry.values()[0]})
-            pids[pid]["filter"] = tempEvents
+pids = curtain()
 
-        # Identify behaviors per PID
-        for pid in pids:
-            behaviorTags = []
-            for entry in pids[pid]["events"]:
-                behaviorTags = buildBehaviors(entry, behaviorTags)
-                pids[pid]["behaviors"] = behaviorTags
-
-        return pids
+print pids
