@@ -1,15 +1,17 @@
 import logging, re, ast, itertools
-import xml.etree.ElementTree as ET
 import sys # Only for testing
 log = logging.getLogger(__name__)
 
-# DEV - TAKES INPUT FOR "curtain.log"
+# DEV - TAKES INDIVIDUAL LINE INPUT FROM TXT
 __author__  = "Jeff White [karttoon] @noottrak"
 __email__   = "karttoon@gmail.com"
 __version__ = "1.0.9"
 __date__    = "04APR2019"
 
-def buildBehaviors(entry, behaviorTags):
+def buildBehaviors(entry):
+
+    behaviorTags = []
+
     # Generates possible code injection variations
     # {Behavior:[["entry1","entry2"],["entry3","entry4"]]}
     behaviorCol = {}
@@ -30,22 +32,28 @@ def buildBehaviors(entry, behaviorTags):
 
     behaviorCol["Code Injection"] = list(itertools.product(*codeInject))
 
-    behaviorCol["Downloader"] = [["New-Object System.Net.WebClient","DownloadFile"],
-                                 ["New-Object System.Net.WebClient","DownloadString"],
-                                 ["New-Object System.Net.WebClient","DownloadData"],
-                                 ["System.Net.WebRequest","WebProxy","System.Net.CredentialCache"],
+    behaviorCol["Downloader"] = [["New-Object", "Net.WebClient","DownloadFile"],
+                                 ["New-Object", "Net.WebClient","DownloadString"],
+                                 ["New-Object", "Net.WebClient","DownloadData"],
+                                 ["WebProxy","Net.CredentialCache"],
                                  ["Import-Module BitsTransfer", "Start-BitsTransfer", "Source", "Destination"],
-                                 ["New-Object System.Net.Sockets.TCPClient", "GetStream"],
-                                 ["$env:LocalAppData"]]
+                                 ["New-Object", "Net.Sockets.TCPClient", "GetStream"],
+                                 ["$env:LocalAppData"],
+                                 ["Invoke-WebRequest"],
+                                 ["wget"],
+                                 ["Get-Content"]]
 
     behaviorCol["Starts Process"] = [["Start-Process"],
-                                     ["New-Object IO.MemoryStream", "New-Object IO.StreamReader"],
-                                     ["System.Diagnostics.Process]::Start"]]
+                                     ["New-Object", "IO.MemoryStream", "IO.StreamReader"],
+                                     ["Diagnostics.Process]::Start"]]
 
-    behaviorCol["Compression"] = [["Convert", "FromBase64String", "System.Text.Encoding"],
-                                  ["New-Object IO.Compression.GzipStream"],
+    behaviorCol["Script Execution"] = [["Invoke-Expression"],
+                                     ["IEX"]]
+
+    behaviorCol["Compression"] = [["Convert", "FromBase64String", "Text.Encoding"],
+                                  ["New-Object", "IO.Compression.GzipStream"],
                                   ["[IO.Compression.CompressionMode]::Decompress"],
-                                  ["New-Object IO.Compression.DeflateStream"]]
+                                  ["New-Object", "IO.Compression.DeflateStream"]]
 
     behaviorCol["Uses Stealth"] = [["WindowStyle", "Hidden"],
                                    ["CreateNoWindow=$true"],
@@ -53,14 +61,14 @@ def buildBehaviors(entry, behaviorTags):
 
     behaviorCol["Key Logging"] = [["GetAsyncKeyState", "Windows.Forms.Keys"]]
 
-    behaviorCol["Screen Scraping"] = [["New-Object Drawing.Bitmap", "Width", "Height"],
+    behaviorCol["Screen Scraping"] = [["New-Object", "Drawing.Bitmap", "Width", "Height"],
                                       ["[Drawing.Graphics]::FromImage"],
                                       ["CopyFroMScreen", "Location", "[Drawing.Point]::Empty", "Size"]]
 
     behaviorCol["Custom Web Fields"] = [["Headers.Add"],
                                         ["SessionKey", "SessiodID"]]
 
-    behaviorCol["Persistence"] = [["New-Object -COMObject", "Schedule.Service"],
+    behaviorCol["Persistence"] = [["New-Object", "-COMObject", "Schedule.Service"],
                                   ["SCHTASKS"]]
 
     behaviorCol["Sleeps"] = [["Start-Sleep"]]
@@ -69,7 +77,7 @@ def buildBehaviors(entry, behaviorTags):
 
     behaviorCol["Obfuscation"] = [["-Join", "[int]", "-as", "[char]"]]
 
-    behaviorCol["Crypto"] = [["New-Object System.Security.Cryptography.AESCryptoServiceProvider", "Mode", "Key", "IV"],
+    behaviorCol["Crypto"] = [["New-Object", "Security.Cryptography.AESCryptoServiceProvider", "Mode", "Key", "IV"],
                              ["CreateEncryptor().TransformFinalBlock"],
                              ["CreateDecryptor().TransformFinalBlock"]]
 
@@ -88,7 +96,7 @@ def buildBehaviors(entry, behaviorTags):
                                             ["[Security.Principal.WindowsBuiltInRole]", "Administrator"],
                                             ["[System.Diagnostics.Process]::GetCurrentProcess"],
                                             ["PSVersionTable.PSVersion"],
-                                            ["New-Object System.Diagnostics.ProcessStartInfo"],
+                                            ["New-Object", "Diagnostics.ProcessStartInfo"],
                                             ["GWMI Win32_ComputerSystemProduct"],
                                             ["Get-WMIObject Win32_ComputerSystemProduct"],
                                             ["Get-Process -id"],
@@ -103,7 +111,7 @@ def buildBehaviors(entry, behaviorTags):
 
     behaviorCol["AppLocker Bypass"] = [["regsvr32", "/i:http", "scrobj.dll"]]
 
-    behaviorCol["AMSI Bypass"] = [["System.Management.Automation.AMSIUtils", "amsiInitFailed"],
+    behaviorCol["AMSI Bypass"] = [["Management.Automation.AMSIUtils", "amsiInitFailed"],
                                   ["Expect100Continue"]]
 
     behaviorCol["Clear Logs"] = [["GlobalSession.ClearLog"]]
@@ -116,6 +124,7 @@ def buildBehaviors(entry, behaviorTags):
 
             for behavior in behaviorCol:
 
+                # Check Behavior Keywords
                 for check in behaviorCol[behavior]:
 
                     bhFlag = True
@@ -125,6 +134,29 @@ def buildBehaviors(entry, behaviorTags):
                             bhFlag = False
 
                     if bhFlag == True:
+                        if behavior not in behaviorTags:
+                            behaviorTags.append(behavior)
+
+                # Check Character Frequency Analysis
+                if behavior == "Obfuscation":
+
+                    if message.count("w") >= 500 or \
+                        message.count("4") >= 250 or \
+                        message.count("_") >= 250 or \
+                        message.count("D") >= 250 or \
+                        message.count("C") >= 200 or \
+                        message.count("K") >= 200 or \
+                        message.count("O") >= 200 or \
+                        message.count(":") >= 100 or \
+                        message.count(";") >= 100 or \
+                        message.count(",") >= 100 or \
+                        (message.count("(") >= 50 and \
+                         message.count(")") >= 50) or \
+                        (message.count("[") >= 50 and \
+                         message.count("]") >= 50) or \
+                        (message.count("{") >= 50 and \
+                         message.count("}") >= 50):
+
                         if behavior not in behaviorTags:
                             behaviorTags.append(behavior)
 
@@ -359,97 +391,85 @@ def curtain():
         "get-help about_Command_Precedence"
     ]
 
-    try:
-        tree = ET.parse(sys.argv[1]) # curtain.log
-        root = tree.getroot()
-    except Exception as e:
-        print "Failed opening curtain.log: %s" % e.message
+    data = open(sys.argv[1]).readlines()
 
     pids          = {}
 
     COUNTER = 0
     FILTERED = 0
 
-    for i in range(0,len(root)):
+    pids["0"] = {"pid": "0", "events": [], "filter": []}
+
+    for i in data:
 
         # Setup PID Dict
-        if root[i][0][1].text == "4104":
 
-            FILTERFLAG = 0
+        FILTERFLAG = 0
 
-            PID = root[i][0][10].attrib['ProcessID']
-            #TID = root[i][0][10].attrib['ThreadID']
+        MESSAGE = i
 
-            MESSAGE = root[i][1][2].text
 
-            if PID not in pids:
-                pids[PID] = {
-                    "pid": PID,
-                    "events": [],
-                    "filter": []
-                }
+        # Checks for unique strings in events to filter out
+        if MESSAGE != None:
+            for entry in noise:
+                if entry in MESSAGE:
+                    FILTERFLAG = 1
+                    FILTERED  += 1
+                    pids["0"]["filter"].append({str(FILTERED): MESSAGE.strip()})
 
-            # Checks for unique strings in events to filter out
-            if MESSAGE != None:
-                for entry in noise:
-                    if entry in MESSAGE:
-                        FILTERFLAG = 1
-                        FILTERED  += 1
-                        pids[PID]["filter"].append({str(FILTERED): MESSAGE.strip()})
+        # Save the record
+        if FILTERFLAG == 0 and MESSAGE != None:
 
-            # Save the record
-            if FILTERFLAG == 0 and MESSAGE != None:
+            COUNTER += 1
+            MODFLAG = 0
 
-                COUNTER += 1
-                MODFLAG = 0
+            # Attempt to further decode token replacement/other common obfuscation
+            # Original and altered will be saved
+            ALTMSG = MESSAGE.strip()
 
-                # Attempt to further decode token replacement/other common obfuscation
-                # Original and altered will be saved
-                ALTMSG = MESSAGE.strip()
+            if re.search("\x00", ALTMSG):
+                ALTMSG, MODFLAG = removeNull(ALTMSG, MODFLAG)
 
-                if re.search("\x00", ALTMSG):
-                    ALTMSG, MODFLAG = removeNull(ALTMSG, MODFLAG)
+            if re.search("(\\\"|\\\')", ALTMSG):
+                ALTMSG, MODFLAG = removeEscape(ALTMSG, MODFLAG)
 
-                if re.search("(\\\"|\\\')", ALTMSG):
-                    ALTMSG, MODFLAG = removeEscape(ALTMSG, MODFLAG)
+            if re.search("`", ALTMSG):
+                ALTMSG, MODFLAG = removeTick(ALTMSG, MODFLAG)
 
-                if re.search("`", ALTMSG):
-                    ALTMSG, MODFLAG = removeTick(ALTMSG, MODFLAG)
+            if re.search("\^", ALTMSG):
+                ALTMSG, MODFLAG = removeCaret(ALTMSG, MODFLAG)
 
-                if re.search("\^", ALTMSG):
-                    ALTMSG, MODFLAG = removeCaret(ALTMSG, MODFLAG)
+            while re.search("[\x20]{2,}", ALTMSG):
+                ALTMSG, MODFLAG = spaceReplace(ALTMSG, MODFLAG)
 
-                while re.search("[\x20]{2,}", ALTMSG):
-                    ALTMSG, MODFLAG = spaceReplace(ALTMSG, MODFLAG)
+            if re.search ("\[[Cc][Hh][Aa][Rr]\][0-9]{1,3}", ALTMSG):
+                ALTMSG, MODFLAG = charReplace(ALTMSG, MODFLAG)
 
-                if re.search ("\[[Cc][Hh][Aa][Rr]\][0-9]{1,3}", ALTMSG):
-                    ALTMSG, MODFLAG = charReplace(ALTMSG, MODFLAG)
+            # One run pre formatReplace
+            if re.search("(\"\+\"|\'\+\')", ALTMSG):
+                ALTMSG, MODFLAG = joinStrings(ALTMSG, MODFLAG)
 
-                # One run pre formatReplace
-                if re.search("(\"\+\"|\'\+\')", ALTMSG):
-                    ALTMSG, MODFLAG = joinStrings(ALTMSG, MODFLAG)
+            while re.search("(\"|\')(\{[0-9]{1,2}\})+(\"|\')[ -fF]+(\'.+?\'\))", ALTMSG):
+                ALTMSG, MODFLAG = formatReplace(ALTMSG, MODFLAG)
 
-                while re.search("(\"|\')(\{[0-9]{1,2}\})+(\"|\')[ -fF]+(\'.+?\'\))", ALTMSG):
-                    ALTMSG, MODFLAG = formatReplace(ALTMSG, MODFLAG)
+            # One run post formatReplace for new strings
+            if re.search("(\"\+\"|\'\+\')", ALTMSG):
+                ALTMSG, MODFLAG = joinStrings(ALTMSG, MODFLAG)
 
-                # One run post formatReplace for new strings
-                if re.search("(\"\+\"|\'\+\')", ALTMSG):
-                    ALTMSG, MODFLAG = joinStrings(ALTMSG, MODFLAG)
+            if "replace" in ALTMSG.lower():
+                try:
+                    ALTMSG, MODFLAG = replaceDecoder(ALTMSG, MODFLAG)
+                except Exception as e:
+                    log.error("Curtain processing error for entry - %s" % e)
 
-                if "replace" in ALTMSG.lower():
-                    try:
-                        ALTMSG, MODFLAG = replaceDecoder(ALTMSG, MODFLAG)
-                    except Exception as e:
-                        log.error("Curtain processing error for entry - %s" % e)
+            # Remove camel case obfuscation as last step
+            ALTMSG, MODFLAG = adjustCase(ALTMSG, MODFLAG)
 
-                # Remove camel case obfuscation as last step
-                ALTMSG, MODFLAG = adjustCase(ALTMSG, MODFLAG)
+            if MODFLAG == 0:
+                ALTMSG = "No alteration of event."
 
-                if MODFLAG == 0:
-                    ALTMSG = "No alteration of event."
-
-                # Save the output
-                pids[PID]["events"].append({str(COUNTER): {"original": MESSAGE.strip(), "altered": ALTMSG}})
+            # Save the output
+            pids["0"]["events"].append({str(COUNTER): {"original": MESSAGE.strip(), "altered": ALTMSG}})
 
     remove = []
 
@@ -486,13 +506,12 @@ def curtain():
         pids[pid]["filter"] = tempEvents
 
     # Identify behaviors per PID
-    behaviorTags = []
     for pid in pids:
         for entry in pids[pid]["events"]:
-            behaviorTags = buildBehaviors(entry, behaviorTags)
+            print buildBehaviors(entry)
 
     return pids
 
 pids = curtain()
 
-print pids
+#print pids
