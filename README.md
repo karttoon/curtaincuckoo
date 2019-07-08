@@ -51,3 +51,10 @@ auxiliary.conf -> .cuckoo/conf/auxiliary.conf
 
 processing.conf -> .cuckoo/conf/processing.conf
 ```
+
+Finally if you're on Cuckoo 2.0.7+ you'll need to update the following line to include the curtain module.
+
+```
+.cuckoo/core/resultserver.py
+    RESULT_UPLOADABLE = ("files", "shots", "buffer",  "extracted", "memory", "curtain")
+```
